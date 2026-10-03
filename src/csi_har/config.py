@@ -33,8 +33,13 @@ MENDELEY_DATASET_ID = "v38wjmz6f6"
 MENDELEY_VERSION = 1
 
 
+N_PHASE_CHANNELS = (N_RX - 1) * N_SUBCARRIERS  # 60 phase differences (RX1-RX2, RX2-RX3)
+FEATURE_SETS = {"amplitude": N_CHANNELS, "amplitude+phase": N_CHANNELS + N_PHASE_CHANNELS}
+
+
 @dataclass(frozen=True)
 class PreprocessConfig:
+    features: str = "amplitude"  # one of FEATURE_SETS
     target_length: int = 256  # time steps after resampling
     hampel_half_window: int = 5
     hampel_n_sigmas: float = 3.0

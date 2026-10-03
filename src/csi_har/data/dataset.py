@@ -2,6 +2,7 @@
 
 Usage:
     python -m csi_har.data.dataset --raw data/raw --out data/processed.npz
+    python -m csi_har.data.dataset --features amplitude+phase --out data/processed_phase.npz
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from pathlib import Path
 
 import numpy as np
 
-from csi_har.config import PreprocessConfig
+from csi_har.config import FEATURE_SETS, PreprocessConfig
 from csi_har.data.reader import iter_zip_trials, parse_csv_text
 from csi_har.preprocess import preprocess_csi
 
@@ -52,9 +53,9 @@ def build_cache(raw_dir: Path, out_path: Path, workers: int | None = None,
     arrays = {"X": np.concatenate(xs).astype(np.float32)}
     arrays.update({name: meta[:, k] for k, name in enumerate(FIELDS)})
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    np.savez(out_path, target_length=cfg.target_length, **arrays)
+    np.savez(out_path, target_length=cfg.target_length, features=cfg.features, **arrays)
 
-    summary = {"trials": int(arrays["X"].shape[0]), "skipped": skipped,
+    summary = {"trials": int(arrays["X"].shape[0]), "channels": int(arrays["X"].shape[1]), "skipped": skipped,
                "subjects": int(len(np.unique(arrays["subject"]))), "seconds": round(time.time() - start)}
     print(summary)
     return summary
@@ -70,8 +71,9 @@ def main() -> None:
     parser.add_argument("--raw", type=Path, default=Path("data/raw"))
     parser.add_argument("--out", type=Path, default=Path("data/processed.npz"))
     parser.add_argument("--workers", type=int, default=None)
+    parser.add_argument("--features", choices=sorted(FEATURE_SETS), default="amplitude")
     args = parser.parse_args()
-    build_cache(args.raw, args.out, args.workers)
+    build_cache(args.raw, args.out, args.workers, PreprocessConfig(features=args.features))
 
 
 if __name__ == "__main__":

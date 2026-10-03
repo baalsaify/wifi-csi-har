@@ -48,7 +48,7 @@ def predict(model: nn.Module, x: np.ndarray, batch_size: int = 256) -> np.ndarra
 
 
 def fit(x_tr, y_tr, x_val, y_val, cfg: TrainConfig, log_prefix: str = "") -> tuple[HARCNN, int]:
-    model = HARCNN()
+    model = HARCNN(in_channels=x_tr.shape[1])
     loader = DataLoader(TensorDataset(torch.from_numpy(x_tr), torch.from_numpy(y_tr)),
                         batch_size=cfg.batch_size, shuffle=True)
     opt = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
@@ -86,8 +86,9 @@ def run(cfg: TrainConfig) -> dict:
         torch.set_num_threads(cfg.num_threads)
     data = load_cache(cfg.data_path)
     x, y = data["X"], (data["activity"] - 1).astype(np.int64)
+    features = str(data.get("features", "amplitude"))
     subjects, envs = data["subject"], data["environment"]
-    print(f"{len(x)} trials, {len(np.unique(subjects))} subjects, input {x.shape[1:]}")
+    print(f"{len(x)} trials, {len(np.unique(subjects))} subjects, features {features}, input {x.shape[1:]}")
 
     oof = np.full(len(y), -1)
     folds = []
@@ -103,6 +104,7 @@ def run(cfg: TrainConfig) -> dict:
     accs, f1s = [f["accuracy"] for f in folds], [f["macro_f1"] for f in folds]
     by_env = {f"environment_{e}": float((oof[envs == e] == y[envs == e]).mean()) for e in np.unique(envs)}
     metrics = {
+        "features": features,
         "protocol": f"{cfg.n_folds}-fold cross-subject (GroupKFold by subject), out-of-fold predictions",
         "n_trials": int(len(y)),
         "accuracy_mean": float(np.mean(accs)), "accuracy_std": float(np.std(accs)),
@@ -121,7 +123,7 @@ def run(cfg: TrainConfig) -> dict:
     val_ids = rng.choice(np.unique(subjects), size=cfg.val_subjects, replace=False)
     is_val = np.isin(subjects, val_ids)
     final, best_epoch = fit(x[~is_val], y[~is_val], x[is_val], y[is_val], cfg, log_prefix="[final] ")
-    save_model(final, cfg.model_dir / "har_cnn.pt", PreprocessConfig(target_length=x.shape[2]),
+    save_model(final, cfg.model_dir / "har_cnn.pt", PreprocessConfig(features=features, target_length=x.shape[2]),
                extra={"cv_accuracy_mean": metrics["accuracy_mean"], "cv_macro_f1_mean": metrics["macro_f1_mean"],
                       "final_best_epoch": best_epoch})
     print(json.dumps({k: metrics[k] for k in ("accuracy_mean", "accuracy_std", "macro_f1_mean",
@@ -139,9 +141,12 @@ def main() -> None:
     parser.add_argument("--lr", type=float, default=defaults.lr)
     parser.add_argument("--seed", type=int, default=defaults.seed)
     parser.add_argument("--threads", type=int, default=0)
+    parser.add_argument("--report-dir", type=Path, default=defaults.report_dir)
+    parser.add_argument("--model-dir", type=Path, default=defaults.model_dir)
     args = parser.parse_args()
     run(TrainConfig(data_path=args.data, epochs=args.epochs, n_folds=args.folds, batch_size=args.batch_size,
-                    lr=args.lr, seed=args.seed, num_threads=args.threads))
+                    lr=args.lr, seed=args.seed, num_threads=args.threads,
+                    report_dir=args.report_dir, model_dir=args.model_dir))
 
 
 if __name__ == "__main__":

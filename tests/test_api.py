@@ -19,7 +19,8 @@ def test_health(client):
 def test_model_info_lists_12_activities(client):
     info = client.get("/model-info").json()
     assert len(info["classes"]) == 12
-    assert info["input"]["channels"] == 90
+    assert info["input"]["csi_values_per_packet"] == 90
+    assert "csi_amplitude" in info["input"]["accepts"]
 
 
 def test_predict_returns_probabilities(client):
@@ -52,6 +53,42 @@ def test_predict_file(client, csv_text):
 def test_predict_file_rejects_garbage(client):
     r = client.post("/predict/file", files={"file": ("x.csv", "not,a,csi,file\n1,2,3,4\n", "text/csv")})
     assert r.status_code == 422
+
+
+def _complex_body(n=200, seed=0):
+    rng = np.random.default_rng(seed)
+    return {"csi_real": rng.normal(size=(n, 90)).tolist(), "csi_imag": rng.normal(size=(n, 90)).tolist()}
+
+
+def test_predict_accepts_complex_csi(client):
+    assert client.post("/predict", json=_complex_body()).status_code == 200
+
+
+def test_predict_rejects_half_complex_or_empty_body(client):
+    body = _complex_body()
+    assert client.post("/predict", json={"csi_real": body["csi_real"]}).status_code == 422
+    assert client.post("/predict", json={}).status_code == 422
+
+
+@pytest.fixture
+def phase_client(tiny_phase_model_path):
+    with TestClient(create_app(tiny_phase_model_path)) as c:
+        yield c
+
+
+def test_phase_model_needs_complex_csi(phase_client):
+    amp = np.ones((100, 90)).tolist()
+    r = phase_client.post("/predict", json={"csi_amplitude": amp})
+    assert r.status_code == 422
+    assert "csi_real" in r.json()["detail"]
+    assert phase_client.post("/predict", json=_complex_body()).status_code == 200
+    assert phase_client.get("/model-info").json()["input"]["accepts"] == ["csi_real + csi_imag"]
+
+
+def test_phase_model_predicts_from_file(phase_client, csv_text):
+    text, _ = csv_text
+    r = phase_client.post("/predict/file", files={"file": ("t.csv", text, "text/csv")})
+    assert r.status_code == 200
 
 
 def test_service_reports_missing_model(tmp_path):

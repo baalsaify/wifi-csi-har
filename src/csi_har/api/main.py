@@ -13,7 +13,7 @@ from pathlib import Path
 
 import numpy as np
 from fastapi import FastAPI, File, HTTPException, UploadFile
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, model_validator
 
 from csi_har import __version__
 from csi_har.config import ACTIVITIES, N_CHANNELS
@@ -23,22 +23,42 @@ DEFAULT_MODEL_PATH = Path("models/har_cnn.pt")
 MAX_UPLOAD_BYTES = 5 * 1024 * 1024
 
 
-class AmplitudeRequest(BaseModel):
-    csi_amplitude: list[list[float]] = Field(
-        ..., description=f"CSI amplitude matrix, one row per packet, {N_CHANNELS} values per row "
-                         "(1 TX x 3 RX x 30 subcarriers). At least 32 packets."
-    )
+Matrix = list[list[float]]
 
-    @field_validator("csi_amplitude")
-    @classmethod
-    def check_shape(cls, rows: list[list[float]]) -> list[list[float]]:
-        if len(rows) < 32:
-            raise ValueError(f"need at least 32 packets, got {len(rows)}")
-        bad = next((i for i, r in enumerate(rows) if len(r) != N_CHANNELS), None)
-        if bad is not None:
-            raise ValueError(f"row {bad} has {len(rows[bad])} values, expected {N_CHANNELS}")
-        return rows
 
+def _check_matrix(name: str, rows: Matrix) -> None:
+    if len(rows) < 32:
+        raise ValueError(f"{name}: need at least 32 packets, got {len(rows)}")
+    bad = next((i for i, r in enumerate(rows) if len(r) != N_CHANNELS), None)
+    if bad is not None:
+        raise ValueError(f"{name}: row {bad} has {len(rows[bad])} values, expected {N_CHANNELS}")
+
+
+class CSIRequest(BaseModel):
+    """Send either complex CSI (``csi_real`` + ``csi_imag``) or, for amplitude-only models, ``csi_amplitude``.
+
+    Each matrix has one row per packet and 90 values per row (1 TX x 3 RX x 30 subcarriers),
+    with at least 32 packets.
+    """
+
+    csi_real: Matrix | None = Field(None, description="Real part of the complex CSI")
+    csi_imag: Matrix | None = Field(None, description="Imaginary part of the complex CSI")
+    csi_amplitude: Matrix | None = Field(None, description="CSI amplitude (amplitude-only models)")
+
+    @model_validator(mode="after")
+    def check_inputs(self) -> CSIRequest:
+        if self.csi_real is not None or self.csi_imag is not None:
+            if self.csi_real is None or self.csi_imag is None:
+                raise ValueError("send both csi_real and csi_imag")
+            _check_matrix("csi_real", self.csi_real)
+            _check_matrix("csi_imag", self.csi_imag)
+            if len(self.csi_real) != len(self.csi_imag):
+                raise ValueError("csi_real and csi_imag must have the same number of packets")
+        elif self.csi_amplitude is not None:
+            _check_matrix("csi_amplitude", self.csi_amplitude)
+        else:
+            raise ValueError("send csi_real + csi_imag, or csi_amplitude")
+        return self
 
 class PredictionResponse(BaseModel):
     activity: str
@@ -73,15 +93,23 @@ def create_app(model_path: str | Path | None = None) -> FastAPI:
         p = predictor()
         return {
             "classes": {f"A{code}": name for code, name in ACTIVITIES.items()},
-            "input": {"channels": N_CHANNELS, "min_packets": p.cfg.min_packets,
-                      "resampled_length": p.cfg.target_length},
+            "input": {"features": p.cfg.features, "csi_values_per_packet": N_CHANNELS,
+                      "min_packets": p.cfg.min_packets, "resampled_length": p.cfg.target_length,
+                      "accepts": ["csi_real + csi_imag"] + ([] if p.needs_phase else ["csi_amplitude"])},
             "training": p.extra,
         }
 
     @app.post("/predict", response_model=PredictionResponse)
-    def predict(request: AmplitudeRequest) -> PredictionResponse:
+    def predict(request: CSIRequest) -> PredictionResponse:
+        p = predictor()
         try:
-            result = predictor().predict_amplitude(np.asarray(request.csi_amplitude, dtype=np.float32))
+            if request.csi_real is not None:
+                csi = np.asarray(request.csi_real) + 1j * np.asarray(request.csi_imag)
+                result = p.predict_csi(csi)
+            elif p.needs_phase:
+                raise ValueError(f"this model uses {p.cfg.features!r} features; send csi_real and csi_imag")
+            else:
+                result = p.predict_amplitude(np.asarray(request.csi_amplitude, dtype=np.float32))
         except ValueError as err:
             raise HTTPException(422, str(err)) from err
         return PredictionResponse(**result.__dict__)

@@ -35,3 +35,12 @@ def tiny_model_path(tmp_path: Path) -> Path:
     path = tmp_path / "model.pt"
     save_model(HARCNN(width=8), path, PreprocessConfig(target_length=64), extra={"note": "test"})
     return path
+
+
+@pytest.fixture
+def tiny_phase_model_path(tmp_path: Path) -> Path:
+    """An untrained amplitude+phase model (150 input channels)."""
+    path = tmp_path / "phase_model.pt"
+    save_model(HARCNN(in_channels=150, width=8), path,
+               PreprocessConfig(features="amplitude+phase", target_length=64))
+    return path

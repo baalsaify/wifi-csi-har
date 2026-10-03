@@ -2,7 +2,37 @@ import numpy as np
 import pytest
 
 from csi_har.config import PreprocessConfig
-from csi_har.preprocess import hampel, lowpass, preprocess_amplitude, resample_linear, zscore
+from csi_har.preprocess import (
+    hampel,
+    lowpass,
+    phase_differences,
+    preprocess_amplitude,
+    preprocess_csi,
+    resample_linear,
+    zscore,
+)
+
+
+def _random_csi(n=400, seed=2):
+    rng = np.random.default_rng(seed)
+    return rng.normal(size=(n, 90)) + 1j * rng.normal(size=(n, 90))
+
+
+def test_amplitude_plus_phase_features_shape():
+    out = preprocess_csi(_random_csi(), PreprocessConfig(features="amplitude+phase", target_length=128))
+    assert out.shape == (150, 128)
+    assert np.isfinite(out).all()
+
+
+def test_phase_difference_cancels_offset_shared_by_all_antennas():
+    csi = _random_csi()
+    offset = np.exp(1j * np.random.default_rng(3).uniform(-np.pi, np.pi, (len(csi), 1)))
+    np.testing.assert_allclose(phase_differences(csi * offset), phase_differences(csi), atol=1e-9)
+
+
+def test_amplitude_only_entry_point_rejects_phase_models():
+    with pytest.raises(ValueError, match="complex CSI"):
+        preprocess_amplitude(np.ones((100, 90)), PreprocessConfig(features="amplitude+phase"))
 
 
 def test_hampel_removes_spike_and_keeps_clean_samples():

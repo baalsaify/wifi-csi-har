@@ -11,7 +11,7 @@ import torch
 from csi_har.config import ACTIVITIES, CLASS_NAMES, PreprocessConfig
 from csi_har.data.reader import parse_csv_text
 from csi_har.models import HARCNN
-from csi_har.preprocess import preprocess_amplitude
+from csi_har.preprocess import preprocess_amplitude, preprocess_csi
 
 
 @dataclass
@@ -47,9 +47,19 @@ class HARPredictor:
         self.model.load_state_dict(checkpoint["state_dict"])
         self.model.eval()
 
-    @torch.no_grad()
+    @property
+    def needs_phase(self) -> bool:
+        return self.cfg.features != "amplitude"
+
     def predict_amplitude(self, amplitude: np.ndarray) -> Prediction:
-        x = torch.from_numpy(preprocess_amplitude(amplitude, self.cfg)).unsqueeze(0)
+        return self._predict(preprocess_amplitude(amplitude, self.cfg))
+
+    def predict_csi(self, csi: np.ndarray) -> Prediction:
+        return self._predict(preprocess_csi(csi, self.cfg))
+
+    @torch.no_grad()
+    def _predict(self, features: np.ndarray) -> Prediction:
+        x = torch.from_numpy(features).unsqueeze(0)
         probs = torch.softmax(self.model(x), dim=1)[0].numpy()
         best = int(probs.argmax())
         code = next(a for a, name in ACTIVITIES.items() if name == self.class_names[best])
@@ -62,4 +72,4 @@ class HARPredictor:
 
     def predict_csv_text(self, text: str) -> Prediction:
         _, csi = parse_csv_text(text)
-        return self.predict_amplitude(np.abs(csi))
+        return self.predict_csi(csi)
