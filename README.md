@@ -44,10 +44,29 @@ The model sees only per-trial-normalized CSI **amplitude**, which removes absolu
 (static postures) and carries little information about motion **direction**. Accuracy is the same
 in the non-line-of-sight setup as in the two line-of-sight rooms.
 
-**Next steps that target exactly these errors:** add CSI phase (sanitized phase differences
-between antennas) or Doppler spectrograms to capture direction; keep absolute amplitude level
-for static postures; and model the experiment sequence (e.g. `sit_still → fall → lie_down`) with
-a sequence model over consecutive segments.
+### Ablation: adding antenna phase differences
+
+To target the direction errors, I added 60 phase-difference streams between neighboring receive
+antennas (RX1−RX2, RX2−RX3), which cancel the random phase offsets of raw Intel 5300 CSI
+(`--features amplitude+phase`, 150 input channels). Same protocol, folds and seeds.
+Results: [`reports/ablation_amplitude_phase_metrics.json`](reports/ablation_amplitude_phase_metrics.json).
+
+| | Amplitude only (served model) | Amplitude + phase |
+|---|---|---|
+| Accuracy (5-fold mean ± std) | 56.9% ± 3.6% | 56.2% ± 3.7% |
+| Macro-F1 | 0.520 ± 0.054 | 0.524 ± 0.041 |
+| `walk_tx_to_rx` ↔ `walk_rx_to_tx` confusion | 35.2% | **26.4%** |
+| `sit_down` ↔ `stand_up` confusion | 23.2% | **15.8%** |
+| F1 `walk_tx_to_rx` / `walk_rx_to_tx` | 0.64 / 0.58 | **0.69 / 0.70** |
+| F1 `pick_up_pen` | **0.56** | 0.46 |
+
+Phase does what it was meant to do, since it clearly reduces the direction confusions, but
+overall accuracy does not change because other classes get slightly worse. The served model
+stays amplitude-only: equal accuracy, fewer inputs, and it accepts amplitude-only requests.
+
+**Next steps:** combine both feature sets with a two-branch model (amplitude and phase encoded
+separately), add Doppler spectrograms, and model the experiment sequence (e.g.
+`sit_still → fall → lie_down`) over consecutive segments.
 
 ## Dataset
 
@@ -88,6 +107,7 @@ pip install -e ".[dev]"
 python -m csi_har.data.download --out data/raw           # ~2.1 GB, resumable, checksum-verified
 python -m csi_har.data.dataset --raw data/raw --out data/processed.npz
 python -m csi_har.train --data data/processed.npz        # writes reports/ and models/har_cnn.pt
+# optional ablation: python -m csi_har.data.dataset --features amplitude+phase --out data/processed_phase.npz
 pytest                                                   # unit + API tests (no dataset needed)
 ```
 
@@ -101,7 +121,7 @@ uvicorn csi_har.api.main:app --reload          # interactive docs at http://127.
 |---|---|---|
 | GET | `/health` | Liveness and whether the model is loaded |
 | GET | `/model-info` | Activity classes, input contract, cross-validation summary |
-| POST | `/predict` | JSON body `{"csi_amplitude": [[90 floats], ...]}` (≥ 32 packets) |
+| POST | `/predict` | JSON: complex CSI as `csi_real` + `csi_imag`, or `csi_amplitude` for amplitude-only models; each `[[90 floats], ...]`, ≥ 32 packets |
 | POST | `/predict/file` | Upload one raw trial CSV from the dataset |
 
 ```bash
@@ -139,6 +159,11 @@ the running container.
 - **Model.** Four Conv1d–BatchNorm–ReLU blocks with global average pooling (any input length
   works), dropout, AdamW, cosine learning-rate schedule, label smoothing, and light gain/jitter
   augmentation. Small enough (< 1 MB) to ship inside the Docker image and run on CPU.
+- **Antenna order, checked against the data.** The CSI tool records a `perm` (antenna-to-RF-chain
+  mapping) per packet, and it changes inside most trials. I compared packet-to-packet amplitude
+  smoothness with the stored order versus re-ordering by `perm` (both conventions): the stored
+  order was smoothest (0.060 vs 0.069 / 0.073 relative change), so the export is already in
+  antenna order and no re-ordering is applied.
 - **Parser.** A vectorized NumPy parser converts the dataset's `a+bi` text format to complex
   arrays (~0.1 s per trial), reading straight from the downloaded zips without extracting them.
 
