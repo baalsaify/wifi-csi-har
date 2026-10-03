@@ -13,8 +13,8 @@ jobs:
       matrix:
         python-version: ["3.10", "3.11"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -33,7 +33,7 @@ jobs:
     needs: test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Build
         run: docker build -t wifi-csi-har:ci .
       - name: Run container
@@ -52,4 +52,4 @@ jobs:
           curl -fsS -X POST http://127.0.0.1:8000/predict -H 'Content-Type: application/json' -d @req.json
       - name: Container logs
         if: always()
-        run: docker logs har
+        run: docker logs har || true

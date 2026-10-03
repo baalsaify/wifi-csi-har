@@ -8,8 +8,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# CPU-only torch keeps the image far smaller than the default CUDA build.
-RUN pip install --index-url https://download.pytorch.org/whl/cpu torch
+# CPU-only torch keeps the image far smaller than the default CUDA build. PyPI stays available as an
+# extra index so torch's own dependencies resolve; the "+cpu" wheel still wins on version ordering.
+RUN pip install --upgrade pip && \
+    pip install --index-url https://download.pytorch.org/whl/cpu --extra-index-url https://pypi.org/simple torch
 
 COPY pyproject.toml README.md ./
 COPY src ./src
