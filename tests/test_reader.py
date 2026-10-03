@@ -31,6 +31,16 @@ def test_negative_imaginary_parts_are_parsed():
     assert csi[0, 0] == complex(-20, -5)
 
 
+def test_scientific_notation_timestamp_is_parsed():
+    # Seen in the real dataset (e.g. E1_S03_C01_A01_T02): timestamp_low = 1.84467440735417e+19
+    text, expected = make_csv_text(n_packets=3)
+    header, *rows = text.strip().split("\n")
+    rows = ["1.84467440735417e+19," + r.split(",", 1)[1] for r in rows]
+    meta, csi = parse_csv_text("\n".join([header, *rows]) + "\n")
+    assert meta[0, 0] == pytest.approx(1.84467440735417e19, rel=1e-6)
+    np.testing.assert_array_equal(csi, expected.astype(np.complex64))
+
+
 def test_rejects_wrong_header():
     with pytest.raises(ValueError, match="header"):
         parse_csv_text("a,b,c\n1,2,3\n")

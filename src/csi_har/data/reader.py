@@ -50,8 +50,10 @@ def parse_csv_text(text: str) -> tuple[np.ndarray, np.ndarray]:
     if not body.strip():
         raise ValueError("file has a header but no packets")
 
-    # "a+bi" -> "a b": turn every row into plain whitespace-separated numbers.
-    flat = body.replace("i", "").replace("+", " ").replace(",", " ")
+    # "a+bi" -> "a b": turn every row into plain whitespace-separated numbers. Some files write
+    # timestamp_low in scientific notation ("1.84467440735417e+19"), so protect exponent signs first.
+    flat = body.replace("e+", "e").replace("E+", "E")
+    flat = flat.replace("i", "").replace("+", " ").replace(",", " ")
     values = np.array(flat.split(), dtype=np.float32)
     if values.size % _VALUES_PER_ROW:
         raise ValueError(f"{values.size} values is not a multiple of {_VALUES_PER_ROW} per row")
