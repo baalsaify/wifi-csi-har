@@ -1,0 +1,22 @@
+﻿# Data is downloaded by `python -m csi_har.data.download` and never committed (CC BY 4.0, ~2.1 GB)
+/data/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+
+# Training scratch
+runs/
+*.ckpt
+
+# OS / editors
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
